@@ -1,3 +1,9 @@
+cmake_minimum_required(VERSION 3.12)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
     set(USERHOME $ENV{USERPROFILE})
@@ -12,26 +18,22 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-option(BUILD_EXAMPLE "Build the standalone example for this library" ON)
-
-
 set(PICO_BOARD pico CACHE STRING "Board type")
-
-cmake_minimum_required(VERSION 3.12)
 
 include(pico_sdk_import.cmake)
 
-project(ds3231_pico)
+project(ds3231_pico C CXX ASM)
 
 pico_sdk_init()
 
 add_subdirectory(src)
 include_directories(src)
-add_executable(ds3231_pico examples/main.c)
 
-pico_enable_stdio_usb(ds3231_pico 1)
-pico_enable_stdio_uart(ds3231_pico 1)
+add_executable(${CMAKE_PROJECT_NAME} examples/main.c)
 
-pico_add_extra_outputs(ds3231_pico)
+pico_enable_stdio_usb(${CMAKE_PROJECT_NAME} 1)
+pico_enable_stdio_uart(${CMAKE_PROJECT_NAME} 1)
 
-target_link_libraries(ds3231_pico ds3231 hardware_i2c pico_stdlib)
+pico_add_extra_outputs(${CMAKE_PROJECT_NAME})
+
+target_link_libraries(${CMAKE_PROJECT_NAME} pico_stdlib ds3231 hardware_i2c)
