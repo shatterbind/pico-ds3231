@@ -1,95 +1,83 @@
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "ds3231.h"
-#include <string.h>
-#include <time.h>
 
+// =============================================================================
+// == Configuration                                                         ==
+// =============================================================================
+
+// -- I2C Configuration --
 #define I2C_BAUDRATE (100 * 1000)
-#define I2C_SCL 20
-#define I2C_SDA 21
+#define I2C_SCL_PIN 20
+#define I2C_SDA_PIN 21
 
-#define SET_TIME_ONCE 0
-#define SET_ALARM_1 1
-#define SET_ALARM_2 1
+// -- RTC Setup Options --
+#define SET_RTC_TIME_ON_BOOT 1
+#define PRINT_TIME_EVERY_SEC 0
 
-// IMPORTANT: Choose only one of the options below
-#define ENABLE_INTERUPT 1
-#define ENABLE_FREQ_1HZ 0
-#define ENABLE_FREQ_1024HZ 0
-#define ENABLE_FREQ_4096HZ 0
-#define ENABLE_FREQ_8192HZ 0
+#define CONFIGURE_ALARM_1 1
+#define CONFIGURE_ALARM_2 1
 
-// Adjust this if you want to set the time a few seconds into the future
-// to account for compile and upload time
-#define COMPILE_UPLOAD_TIME 6
+/**
+ * @brief Select the operating mode for the INT/SQW output pin.
+ * 0: Interrupt mode (for alarms).
+ * 1: 1 Hz square wave.
+ * 2: 1024 Hz square wave.
+ * 3: 4096 Hz square wave.
+ * 4: 8192 Hz square wave.
+ */
+#define RTC_OUTPUT_MODE 0
 
-int main()
+/**
+ * @brief Delay in seconds to compensate for compilation and upload time.
+ */
+#define COMPILE_UPLOAD_OFFSET_SECONDS 6
+
+// =============================================================================
+// == Helper Functions                                                      ==
+// =============================================================================
+
+void setup_rtc(void)
 {
-
-	stdio_init_all();
-	sleep_ms(1000);
-	printf("DS3231 RTC Example\n\n");
-
-	i2c_init(DS3231_I2C_PORT, I2C_BAUDRATE);
-	gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
-	gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-	gpio_pull_up(I2C_SDA);
-	gpio_pull_up(I2C_SCL);
-
-#if SET_TIME_ONCE
+#if SET_RTC_TIME_ON_BOOT
 	printf("Setting RTC time from PC compile time...\n");
-	struct tm date_tm = {0};
 
-	const char *compile_date = __DATE__;
-	const char *compile_time = __TIME__;
+	struct tm compile_tm = {0};
+	// Parse date "Mmm dd yyyy"
+	sscanf(__DATE__, "%*s %d %d", &compile_tm.tm_mday, &compile_tm.tm_year);
+	compile_tm.tm_year -= 1900; // tm_year is years since 1900
 
-	printf("Compile Date: %s\n", compile_date);
-	printf("Compile Time: %s\n", compile_time);
+	// Parse time "hh:mm:ss"
+	sscanf(__TIME__, "%d:%d:%d", &compile_tm.tm_hour, &compile_tm.tm_min, &compile_tm.tm_sec);
 
-	int year, month, day, hour, min, sec;
+	// Convert month name to number
+	const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 	char month_str[4];
+	sscanf(__DATE__, "%3s", month_str);
+	for (int i = 0; i < 12; i++)
+	{
+		if (strcmp(month_str, months[i]) == 0)
+		{
+			compile_tm.tm_mon = i;
+			break;
+		}
+	}
 
-	sscanf(compile_time, "%d:%d:%d", &hour, &min, &sec);
-	sscanf(compile_date, "%s %d %d", month_str, &day, &year);
-
-	if (strcmp(month_str, "Jan") == 0)
-		month = 1;
-	else if (strcmp(month_str, "Feb") == 0)
-		month = 2;
-	else if (strcmp(month_str, "Mar") == 0)
-		month = 3;
-	else if (strcmp(month_str, "Apr") == 0)
-		month = 4;
-	else if (strcmp(month_str, "May") == 0)
-		month = 5;
-	else if (strcmp(month_str, "Jun") == 0)
-		month = 6;
-	else if (strcmp(month_str, "Jul") == 0)
-		month = 7;
-	else if (strcmp(month_str, "Aug") == 0)
-		month = 8;
-	else if (strcmp(month_str, "Sep") == 0)
-		month = 9;
-	else if (strcmp(month_str, "Oct") == 0)
-		month = 10;
-	else if (strcmp(month_str, "Nov") == 0)
-		month = 11;
-	else if (strcmp(month_str, "Dec") == 0)
-		month = 12;
-
-	date_tm.tm_year = year - 1900;
-	date_tm.tm_mon = month - 1;
-	date_tm.tm_mday = day;
+	time_t compile_time_t = mktime(&compile_tm);
+	compile_time_t += COMPILE_UPLOAD_OFFSET_SECONDS;
+	struct tm *now_tm = localtime(&compile_time_t);
 
 	ds3231_datetime_t dt_to_set = {
-		.year = year % 100,
-		.month = month,
-		.day = day,
-		.dow = date_tm.tm_wday,
-		.hour = hour,
-		.min = min + (sec + COMPILE_UPLOAD_TIME > 59 ? 1 : 0),
-		.sec = sec + COMPILE_UPLOAD_TIME % 60};
+		.year = (uint8_t)(now_tm->tm_year % 100),
+		.month = (uint8_t)(now_tm->tm_mon + 1),
+		.day = (uint8_t)now_tm->tm_mday,
+		.dow = (uint8_t)(now_tm->tm_wday + 1), // tm_wday is 0-6, DS3231 is 1-7
+		.hour = (uint8_t)now_tm->tm_hour,
+		.min = (uint8_t)now_tm->tm_min,
+		.sec = (uint8_t)now_tm->tm_sec};
 
 	if (ds3231_set_time(&dt_to_set))
 	{
@@ -101,74 +89,86 @@ int main()
 	}
 #endif
 
-#if SET_ALARM_1
+#if CONFIGURE_ALARM_1
 
-	ds3231_alarm_time_t alarm_time_1 = {
-		.hour = 20,
-		.min = 18,
-		.sec = 45};
+	ds3231_alarm_time_t alarm_1 = {.day = 0, .hour = 0, .min = 0, .sec = 30};
 
-	printf("Setting Alarm 1: day: %d, hour: %d, minute: %d, second: %d\n", alarm_time_1.day, alarm_time_1.hour, alarm_time_1.min, alarm_time_1.sec);
+	printf("Setting Alarm 1 to trigger when day=%d hour=%d minute=%d second=%d.\n",
+		   alarm_1.day, alarm_1.hour, alarm_1.min, alarm_1.sec);
 
-	if (ds3231_set_alarm1(&alarm_time_1, ALARM1_MINUTES_SECONDS_MATCH))
+	if (ds3231_set_alarm1(&alarm_1, ALARM1_SECONDS_MATCH))
 	{
-		printf("Alarm 1 configured.\n\n");
+		printf("Alarm 1 configured successfully.\n");
 	}
 	else
 	{
-		printf("ERROR: Failed to configure Alarm 1.\n\n");
+		printf("ERROR: Failed to configure Alarm 1.\n");
 	}
 
 #endif
 
-#if SET_ALARM_2
+#if CONFIGURE_ALARM_2
 
-	ds3231_alarm_time_t alarm_time_2 = {
-		.min = 16};
+	ds3231_alarm_time_t alarm_2 = {.day = 0, .hour = 0, .min = 18};
 
-	printf("Setting Alarm 2: day: %d, hour: %d, minute: %d\n", alarm_time_2.day, alarm_time_2.hour, alarm_time_2.min);
+	printf("Setting Alarm 2 to trigger when day=%d hour=%d minute=%d.\n",
+		   alarm_2.day, alarm_2.hour, alarm_2.min);
 
-	if (ds3231_set_alarm2(&alarm_time_2, ALARM2_MINUTES_MATCH))
+	if (ds3231_set_alarm2(&alarm_2, ALARM2_MINUTES_MATCH))
 	{
-		printf("Alarm 2 configured.\n\n");
+		printf("Alarm 2 configured successfully.\n");
 	}
 	else
 	{
-		printf("ERROR: Failed to configure Alarm 2.\n\n");
+		printf("ERROR: Failed to configure Alarm 2.\n");
 	}
 
 #endif
 
-#if ENABLE_INTERUPT
-	if (ds3231_enable_interrupt_mode())
-	{
-		printf("RTC configured for interrupt mode.\n");
-	}
-#elif ENABLE_FREQ_1HZ
-	if (ds3231_enable_sqw_output(SQW_FREQ_1HZ))
-	{
-		printf("RTC configured for frequency 1HZ.\n");
-	}
-#elif ENABLE_FREQ_1024HZ
-	if (ds3231_enable_sqw_output(SQW_FREQ_1024HZ))
-	{
-		printf("RTC configured for frequency 1024HZ.\n", SQW_FREQ_1024HZ);
-	}
-#elif ENABLE_FREQ_4096HZ
-	if (ds3231_enable_sqw_output(SQW_FREQ_4096HZ))
-	{
-		printf("RTC configured for frequency 4096HZ.\n");
-	}
-#elif ENABLE_FREQ_8192HZ
-	if (ds3231_enable_sqw_output(SQW_FREQ_8192HZ))
-	{
-		printf("RTC configured for frequency 8192HZ.\n");
-	}
+#if RTC_OUTPUT_MODE == 0
+	ds3231_enable_interrupt_mode();
+	printf("RTC configured for interrupt mode.\n");
+#elif RTC_OUTPUT_MODE == 1
+	ds3231_enable_sqw_output(SQW_FREQ_1HZ);
+	printf("RTC configured for 1 Hz square wave output.\n");
+#elif RTC_OUTPUT_MODE == 2
+	ds3231_enable_sqw_output(SQW_FREQ_1024HZ);
+	printf("RTC configured for 1024 Hz square wave output.\n");
+#elif RTC_OUTPUT_MODE == 3
+	ds3231_enable_sqw_output(SQW_FREQ_4096HZ);
+	printf("RTC configured for 4096 Hz square wave output.\n");
+#elif RTC_OUTPUT_MODE == 4
+	ds3231_enable_sqw_output(SQW_FREQ_8192HZ);
+	printf("RTC configured for 8192 Hz square wave output.\n");
 #endif
+	printf("\n");
+}
+
+// =============================================================================
+// == Main Function                                                         ==
+// =============================================================================
+
+void main()
+{
+	stdio_init_all();
+
+	sleep_ms(2000);
+
+	printf("DS3231 RTC Example\n---\n");
+
+	i2c_init(DS3231_I2C_PORT, I2C_BAUDRATE);
+	gpio_set_function(I2C_SDA_PIN, GPIO_FUNC_I2C);
+	gpio_set_function(I2C_SCL_PIN, GPIO_FUNC_I2C);
+	gpio_pull_up(I2C_SDA_PIN);
+	gpio_pull_up(I2C_SCL_PIN);
+
+	setup_rtc();
 
 	ds3231_datetime_t now;
+
 	while (true)
 	{
+#if PRINT_TIME_EVERY_SEC
 		if (ds3231_read_time(&now))
 		{
 			printf("Current Time: 20%02d-%02d-%02d %02d:%02d:%02d (Day %d)\n",
@@ -178,32 +178,19 @@ int main()
 		{
 			printf("ERROR: Failed to read time from RTC.\n");
 		}
-
+#endif
 		if (ds3231_check_alarm_flag(ALARM_1))
 		{
 			printf("<<<<< ALARM 1 TRIGGERED! >>>>>\n");
-
-			ds3231_clear_alarm_flag(ALARM_1);
-
-			if (ds3231_set_alarm1(&alarm_time_1, ALARM1_MINUTES_SECONDS_MATCH))
-			{
-				printf("Alarm 1 configured.\n\n");
-			}
-			else
-			{
-				printf("ERROR: Failed to configure Alarm 1.\n\n");
-			}
+			ds3231_clear_alarm_flag(ALARM_1); // Just clear the flag
 		}
 
 		if (ds3231_check_alarm_flag(ALARM_2))
 		{
 			printf("<<<<< ALARM 2 TRIGGERED! >>>>>\n");
-
-			ds3231_clear_alarm_flag(ALARM_2);
+			ds3231_clear_alarm_flag(ALARM_2); // Just clear the flag
 		}
 
 		sleep_ms(1000);
 	}
-
-	return 0;
 }
