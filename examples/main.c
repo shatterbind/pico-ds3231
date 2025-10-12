@@ -31,7 +31,7 @@ int main()
 	sleep_ms(1000);
 	printf("DS3231 RTC Example\n\n");
 
-	i2c_init(I2C_PORT, I2C_BAUDRATE);
+	i2c_init(DS3231_I2C_PORT, I2C_BAUDRATE);
 	gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
 	gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
 	gpio_pull_up(I2C_SDA);
@@ -82,7 +82,7 @@ int main()
 	date_tm.tm_mon = month - 1;
 	date_tm.tm_mday = day;
 
-	DateTime dt_to_set = {
+	ds3231_datetime_t dt_to_set = {
 		.year = year % 100,
 		.month = month,
 		.day = day,
@@ -103,7 +103,7 @@ int main()
 
 #if SET_ALARM_1
 
-	AlarmTime alarm_time_1 = {
+	ds3231_alarm_time_t alarm_time_1 = {
 		.hour = 20,
 		.min = 18,
 		.sec = 45};
@@ -123,7 +123,7 @@ int main()
 
 #if SET_ALARM_2
 
-	AlarmTime alarm_time_2 = {
+	ds3231_alarm_time_t alarm_time_2 = {
 		.min = 16};
 
 	printf("Setting Alarm 2: day: %d, hour: %d, minute: %d\n", alarm_time_2.day, alarm_time_2.hour, alarm_time_2.min);
@@ -166,7 +166,7 @@ int main()
 	}
 #endif
 
-	DateTime now;
+	ds3231_datetime_t now;
 	while (true)
 	{
 		if (ds3231_read_time(&now))
