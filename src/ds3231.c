@@ -108,8 +108,8 @@ bool ds3231_read_time(ds3231_datetime_t *dt) {
     if (dt == NULL) {
         return false;
     }
-
-    uint8_t read_buf[7];
+    const size_t buffer_size = 7;
+    uint8_t read_buf[buffer_size];
     uint8_t start_reg = DS3231_REG_TIME;
 
     if (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, &start_reg, 1, true) != 1) {
