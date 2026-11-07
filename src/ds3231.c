@@ -22,6 +22,11 @@
 #define STATUS_A1F_BIT          (1 << 0) // Alarm 1 Flag
 #define STATUS_A2F_BIT          (1 << 1) // Alarm 2 Flag
 #define STATUS_EN32KHZ_BIT      (1 << 3) // Enable 32kHz Output
+#define STATUS_OSF_BIT          (1 << 7) // Oscillator Stop Flag
+
+// -- Hours Register Bits (0x02) --
+#define HOUR_12H_MODE_BIT       0x40 // 1 = 12-hour mode
+#define HOUR_PM_BIT             0x20 // PM flag in 12-hour mode
 
 // -- Alarm Register Bits --
 #define ALARM_MASK_BIT          0x80 // Bit 7 of each alarm register (AxMy)
@@ -33,16 +38,32 @@
 // =============================================================================
 
 /**
+ * @brief I2C write with a timeout so a stuck bus or missing RTC cannot hang.
+ * @return Number of bytes written, or a negative PICO_ERROR_* code.
+ */
+static int s_i2c_write(const uint8_t *src, size_t len, bool nostop) {
+    return i2c_write_timeout_us(DS3231_I2C_PORT, DS3231_I2C_ADDR, src, len, nostop, DS3231_I2C_TIMEOUT_US);
+}
+
+/**
+ * @brief I2C read with a timeout so a stuck bus or missing RTC cannot hang.
+ * @return Number of bytes read, or a negative PICO_ERROR_* code.
+ */
+static int s_i2c_read(uint8_t *dst, size_t len, bool nostop) {
+    return i2c_read_timeout_us(DS3231_I2C_PORT, DS3231_I2C_ADDR, dst, len, nostop, DS3231_I2C_TIMEOUT_US);
+}
+
+/**
  * @brief Reads a single byte from a specified DS3231 register.
  * @param reg_addr The address of the register to read from.
  * @param data Pointer to a uint8_t to store the read value.
  * @return `true` on success, `false` on I2C failure.
  */
 static bool s_read_register(uint8_t reg_addr, uint8_t *data) {
-    if (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, &reg_addr, 1, true) != 1) {
+    if (s_i2c_write(&reg_addr, 1, true) != 1) {
         return false;
     }
-    if (i2c_read_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, data, 1, false) != 1) {
+    if (s_i2c_read(data, 1, false) != 1) {
         return false;
     }
     return true;
@@ -56,7 +77,7 @@ static bool s_read_register(uint8_t reg_addr, uint8_t *data) {
  */
 static bool s_write_register(uint8_t reg_addr, uint8_t value) {
     uint8_t buf[2] = {reg_addr, value};
-    return (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, buf, 2, false) == 2);
+    return (s_i2c_write(buf, 2, false) == 2);
 }
 
 /**
@@ -90,38 +111,43 @@ bool ds3231_set_time(const ds3231_datetime_t *dt) {
         return false;
     }
 
-    const size_t buffer_size = 8;
-    uint8_t buf[buffer_size];
+    uint8_t buf[8];
     buf[0] = DS3231_REG_TIME;
     buf[1] = dec_to_bcd(dt->sec);
     buf[2] = dec_to_bcd(dt->min);
-    buf[3] = dec_to_bcd(dt->hour);
+    buf[3] = dec_to_bcd(dt->hour); // bit 6 clear -> 24-hour mode
     buf[4] = dec_to_bcd(dt->dow);
     buf[5] = dec_to_bcd(dt->day);
     buf[6] = dec_to_bcd(dt->month);
     buf[7] = dec_to_bcd(dt->year);
 
-    return (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, buf, buffer_size, false) == buffer_size);
+    return (s_i2c_write(buf, sizeof(buf), false) == (int)sizeof(buf));
 }
 
 bool ds3231_read_time(ds3231_datetime_t *dt) {
     if (dt == NULL) {
         return false;
     }
-    const size_t buffer_size = 7;
-    uint8_t read_buf[buffer_size];
+    uint8_t read_buf[7];
     uint8_t start_reg = DS3231_REG_TIME;
 
-    if (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, &start_reg, 1, true) != 1) {
+    if (s_i2c_write(&start_reg, 1, true) != 1) {
         return false;
     }
-    if (i2c_read_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, read_buf, 7, false) != 7) {
+    if (s_i2c_read(read_buf, sizeof(read_buf), false) != (int)sizeof(read_buf)) {
         return false;
     }
 
     dt->sec   = bcd_to_dec(read_buf[0]);
     dt->min   = bcd_to_dec(read_buf[1]);
-    dt->hour  = bcd_to_dec(read_buf[2]);
+    if (read_buf[2] & HOUR_12H_MODE_BIT) {
+        // 12-hour mode (set by another tool): convert to 24-hour.
+        uint8_t hour12 = bcd_to_dec(read_buf[2] & 0x1F); // 1-12
+        bool pm = (read_buf[2] & HOUR_PM_BIT) != 0;
+        dt->hour = (uint8_t)((hour12 % 12) + (pm ? 12 : 0));
+    } else {
+        dt->hour = bcd_to_dec(read_buf[2] & 0x3F);
+    }
     dt->dow   = bcd_to_dec(read_buf[3]);
     dt->day   = bcd_to_dec(read_buf[4]);
     dt->month = bcd_to_dec(read_buf[5] & 0x7F); // Century bit is not used
@@ -169,7 +195,7 @@ bool ds3231_set_alarm1(const ds3231_alarm_time_t *at, ds3231_alarm1_mode_t mode)
     }
 
     // Write the 4 alarm registers in one transaction
-    if (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, buf, 5, false) != 5) {
+    if (s_i2c_write(buf, 5, false) != 5) {
         return false;
     }
 
@@ -206,7 +232,7 @@ bool ds3231_set_alarm2(const ds3231_alarm_time_t *at, ds3231_alarm2_mode_t mode)
             break;
     }
 
-    if (i2c_write_blocking(DS3231_I2C_PORT, DS3231_I2C_ADDR, buf, 4, false) != 4) {
+    if (s_i2c_write(buf, 4, false) != 4) {
         return false;
     }
 
@@ -255,4 +281,22 @@ bool ds3231_enable_sqw_output(ds3231_sqw_freq_t freq) {
 bool ds3231_enable_interrupt_mode() {
     // To enable interrupt mode, INTCN bit must be 1
     return s_update_register_bits(DS3231_REG_CONTROL, 0, CONTROL_INTCN_BIT);
+}
+
+// --- Oscillator Stop Flag ---
+
+bool ds3231_oscillator_stopped(bool *stopped) {
+    if (stopped == NULL) {
+        return false;
+    }
+    uint8_t status_reg;
+    if (!s_read_register(DS3231_REG_STATUS, &status_reg)) {
+        return false;
+    }
+    *stopped = (status_reg & STATUS_OSF_BIT) != 0;
+    return true;
+}
+
+bool ds3231_clear_oscillator_stop_flag(void) {
+    return s_update_register_bits(DS3231_REG_STATUS, STATUS_OSF_BIT, 0);
 }
