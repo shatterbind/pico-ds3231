@@ -1,6 +1,6 @@
 # DS3231 RTC Driver for Raspberry Pi Pico
 
-A simple, clean C driver for the DS3231 Real-Time Clock (RTC) designed for the Raspberry Pi Pico (RP2040) C/C++ SDK. Provides a high-level API for time/date, dual alarms, interrupts, and output configuration.
+A simple, clean C driver for the DS3231 Real-Time Clock (RTC) designed for the Raspberry Pi Pico / Pico 2 (RP2040 / RP2350) C/C++ SDK. Provides a high-level API for time/date, dual alarms, interrupts, and output configuration.
 
 ## Features
 - Read/set time and date (year, month, day, day-of-week, hour, minute, second)
@@ -9,9 +9,11 @@ A simple, clean C driver for the DS3231 Real-Time Clock (RTC) designed for the R
 - Square-wave output on INT/SQW (1 Hz, 1.024 kHz, 4.096 kHz, 8.192 kHz)
 - 32 kHz dedicated output enable/disable
 - Robust API: functions return `true` on success, `false` on I2C failure
+- I2C timeouts (`DS3231_I2C_TIMEOUT_US`), so a missing RTC never hangs the caller
+- Oscillator Stop Flag (`ds3231_oscillator_stopped`) to detect lost time after power loss
 
 ## Hardware Requirements
-- Raspberry Pi Pico or compatible RP2040 board  
+- Raspberry Pi Pico / Pico 2 or compatible RP2040 / RP2350 board  
 - DS3231 RTC module  
 - Jumper wires for I2C
 

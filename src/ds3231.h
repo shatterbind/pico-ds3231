@@ -40,6 +40,14 @@
 #define DS3231_I2C_PORT i2c0
 #endif
 
+/**
+ * @brief Timeout for each I2C transfer, in microseconds. A missing RTC or a
+ * stuck bus makes calls return `false` instead of hanging forever.
+ */
+#ifndef DS3231_I2C_TIMEOUT_US
+#define DS3231_I2C_TIMEOUT_US 10000
+#endif
+
 // =============================================================================
 // == Public Data Types                                                       ==
 // =============================================================================
@@ -199,6 +207,24 @@ bool ds3231_enable_sqw_output(ds3231_sqw_freq_t freq);
  * @return `true` on success, `false` on failure.
  */
 bool ds3231_enable_interrupt_mode();
+
+
+// --- Oscillator Stop Flag ---
+
+/**
+ * @brief Reads the Oscillator Stop Flag (OSF).
+ * @note OSF is set on first power-up and whenever the oscillator stopped
+ * (e.g. main and backup power both lost). If it is set, the time is invalid.
+ * @param stopped Receives `true` if the oscillator has stopped since OSF was last cleared.
+ * @return `true` on success, `false` on I2C failure.
+ */
+bool ds3231_oscillator_stopped(bool *stopped);
+
+/**
+ * @brief Clears the Oscillator Stop Flag. Call after setting a valid time.
+ * @return `true` on success, `false` on failure.
+ */
+bool ds3231_clear_oscillator_stop_flag(void);
 
 
 // =============================================================================
